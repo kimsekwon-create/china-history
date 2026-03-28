@@ -1476,14 +1476,22 @@ window.addEventListener('resize', () => {
 // Scroll animations
 const observer = new IntersectionObserver((entries) => {
   entries.forEach(entry => {
-    if (entry.isIntersecting) entry.target.classList.add('visible');
+    if (entry.isIntersecting) {
+      entry.target.classList.add('visible');
+      observer.unobserve(entry.target);
+    }
   });
-}, { threshold: 0.1, rootMargin: '0px 0px -50px 0px' });
+}, { threshold: 0.05, rootMargin: '0px 0px 100px 0px' });
 
 document.querySelectorAll('.dynasty-card').forEach((el, i) => {
-  el.style.transitionDelay = (i % 2 * 0.15) + 's';
+  el.style.transitionDelay = (i % 2 * 0.1) + 's';
   observer.observe(el);
 });
+
+// Fallback: 1.5초 후 모든 카드 강제 표시
+setTimeout(() => {
+  document.querySelectorAll('.dynasty-card').forEach(el => el.classList.add('visible'));
+}, 1500);
 
 // Search bar show on scroll
 window.addEventListener('scroll', () => {
@@ -1900,7 +1908,7 @@ const DYNASTIES = {
         events:[
           {year:'AD 1134', text:'악비(岳飛) 연전연승 — 중원 회복 직전'},
           {year:'AD 1141', text:'진회(秦檜)의 모함 — 악비 투옥, "막수유(莫須有)" 죄목'},
-          {year:'AD 1142', text:'<em>악비 처형</em> — 금나라와 소흥 화의, 굴욕적 강화'),
+          {year:'AD 1142', text:'<em>악비 처형</em> — 금나라와 소흥 화의, 굴욕적 강화'},
           {year:'AD 1279', text:'애산(崖山) 해전 — 마지막 황제 바다에 투신, <em>남송 멸망</em>'},
         ]},
     ]
@@ -1979,7 +1987,7 @@ const DYNASTIES = {
         desc:'61년간 재위한 청나라 최전성기의 황제. 삼번의 난을 평정하고 러시아와 조약을 맺었다.',
         events:[
           {year:'AD 1661', text:'8세에 즉위 — 역대 중국 황제 <em>최장 재위(61년)</em>'},
-          {year:'AD 1673~1681', text:'삼번의 난(三藩之亂) 평정 — 오삼계 반란 제압'),
+          {year:'AD 1673~1681', text:'삼번의 난(三藩之亂) 평정 — 오삼계 반란 제압'},
           {year:'AD 1683', text:'대만 정씨 정권 복속'},
           {year:'AD 1689', text:'러시아와 <em>네르친스크 조약</em> — 중국 최초의 근대적 국제조약'},
           {year:'AD 1720', text:'티베트 복속 — 청나라 최대 영토 달성'},
@@ -1995,9 +2003,9 @@ const DYNASTIES = {
       { num:'후기', nameZh:'道光·咸豐帝', nameKr:'도광제·함풍제 — 서구 열강의 침략', year:'AD 1820',
         events:[
           {year:'AD 1839', text:'임칙서(林則徐) 아편 소각 — 호문(虎門)에서 2만 상자'},
-          {year:'AD 1840~1842', text:'<em>제1차 아편전쟁</em> — 청 패배, 난징 조약'),
-          {year:'AD 1842', text:'홍콩 할양, 상하이 등 5개 항구 개방 — 불평등 조약 시대'),
-          {year:'AD 1851~1864', text:'<em>태평천국의 난</em> — 홍수전, 2천만 명 사망'),
+          {year:'AD 1840~1842', text:'<em>제1차 아편전쟁</em> — 청 패배, 난징 조약'},
+          {year:'AD 1842', text:'홍콩 할양, 상하이 등 5개 항구 개방 — 불평등 조약 시대'},
+          {year:'AD 1851~1864', text:'<em>태평천국의 난</em> — 홍수전, 2천만 명 사망'},
           {year:'AD 1856~1860', text:'제2차 아편전쟁 — 영불 연합군 베이징 점령, 원명원 소각'},
         ]},
       { num:'말대', nameZh:'光緖·宣統帝', nameKr:'광서제·선통제 — 청 멸망', year:'AD 1875',
