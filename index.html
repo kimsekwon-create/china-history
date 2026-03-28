@@ -2243,5 +2243,474 @@ function closeDetail() {
   activeDetailIdx = null;
 }
 </script>
+
+<!-- ===== 三國志 EPIC BGM ENGINE ===== -->
+<style>
+#bgm-panel {
+  position: fixed;
+  bottom: 28px;
+  right: 28px;
+  z-index: 9990;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 10px;
+  font-family: 'Noto Serif KR', serif;
+}
+#bgm-btn {
+  width: 58px;
+  height: 58px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 35%, #e8b86d, #8b4a10);
+  border: 2px solid #c9933a;
+  box-shadow: 0 0 18px rgba(201,147,58,0.55), 0 2px 12px rgba(0,0,0,0.6);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 22px;
+  color: #fff;
+  transition: all 0.3s;
+  position: relative;
+}
+#bgm-btn:hover { transform: scale(1.08); box-shadow: 0 0 28px rgba(201,147,58,0.8); }
+#bgm-btn.playing::after {
+  content: '';
+  position: absolute;
+  inset: -5px;
+  border-radius: 50%;
+  border: 2px solid rgba(201,147,58,0.4);
+  animation: pulse-ring 1.8s ease-out infinite;
+}
+@keyframes pulse-ring {
+  0% { transform: scale(1); opacity:0.8; }
+  100% { transform: scale(1.5); opacity:0; }
+}
+#bgm-card {
+  background: rgba(10,7,4,0.92);
+  border: 1px solid rgba(201,147,58,0.35);
+  border-radius: 12px;
+  padding: 14px 18px;
+  min-width: 210px;
+  box-shadow: 0 4px 24px rgba(0,0,0,0.7);
+  display: none;
+  flex-direction: column;
+  gap: 10px;
+  backdrop-filter: blur(10px);
+}
+#bgm-card.show { display: flex; }
+#bgm-title { color: #e8b86d; font-size: 12px; letter-spacing: 2px; text-align: center; border-bottom: 1px solid rgba(201,147,58,0.2); padding-bottom: 8px; }
+#bgm-track-name { color: #f0e6ce; font-size: 13px; text-align: center; }
+.bgm-label { color: rgba(240,230,206,0.5); font-size: 10px; letter-spacing: 1px; margin-bottom: 2px; }
+#bgm-vol-wrap { display: flex; align-items: center; gap: 8px; }
+#bgm-vol { flex: 1; accent-color: #c9933a; cursor: pointer; height: 4px; }
+#bgm-vol-icon { font-size: 14px; }
+#bgm-eq { display: flex; align-items: flex-end; gap: 3px; height: 20px; justify-content: center; }
+.eq-bar {
+  width: 4px;
+  background: linear-gradient(to top, #c9933a, #e8b86d);
+  border-radius: 2px;
+  animation: eq-bounce var(--d, 0.7s) ease-in-out infinite alternate;
+}
+@keyframes eq-bounce {
+  from { height: 3px; }
+  to { height: var(--h, 18px); }
+}
+#bgm-eq.paused .eq-bar { animation-play-state: paused; }
+</style>
+
+<div id="bgm-panel">
+  <div id="bgm-card">
+    <div id="bgm-title">♪ 三國志 · 大樂 ♪</div>
+    <div id="bgm-track-name">천하웅패의 서 — 序章</div>
+    <div id="bgm-eq" class="paused">
+      <div class="eq-bar" style="--d:0.6s;--h:14px"></div>
+      <div class="eq-bar" style="--d:0.9s;--h:18px"></div>
+      <div class="eq-bar" style="--d:0.5s;--h:10px"></div>
+      <div class="eq-bar" style="--d:0.8s;--h:16px"></div>
+      <div class="eq-bar" style="--d:0.65s;--h:12px"></div>
+      <div class="eq-bar" style="--d:0.75s;--h:20px"></div>
+      <div class="eq-bar" style="--d:0.55s;--h:8px"></div>
+    </div>
+    <div class="bgm-label">음량</div>
+    <div id="bgm-vol-wrap">
+      <span id="bgm-vol-icon">🔈</span>
+      <input type="range" id="bgm-vol" min="0" max="100" value="55">
+    </div>
+  </div>
+  <button id="bgm-btn" title="BGM 재생/정지">🥁</button>
+</div>
+
+<script>
+(function() {
+  /* ─── Web Audio Context ─── */
+  let ctx = null, masterGain = null, isPlaying = false;
+  let scheduledSources = [], loopTimer = null;
+
+  const BTN = document.getElementById('bgm-btn');
+  const CARD = document.getElementById('bgm-card');
+  const EQ = document.getElementById('bgm-eq');
+  const VOL = document.getElementById('bgm-vol');
+  const VOLICON = document.getElementById('bgm-vol-icon');
+
+  // Toggle card
+  BTN.addEventListener('click', () => {
+    if (!isPlaying) {
+      startBGM();
+    } else {
+      stopBGM();
+    }
+    CARD.classList.toggle('show', isPlaying);
+  });
+
+  VOL.addEventListener('input', () => {
+    if (masterGain) masterGain.gain.setTargetAtTime(VOL.value / 100, ctx.currentTime, 0.05);
+    VOLICON.textContent = VOL.value == 0 ? '🔇' : VOL.value < 50 ? '🔈' : '🔊';
+  });
+
+  /* ─── Music Theory: Pentatonic C (C D E G A) + extensions ─── */
+  // Frequencies for heroic Chinese-style pentatonic
+  const PENT = [130.81, 146.83, 164.81, 196.00, 220.00,  // C3 D3 E3 G3 A3
+                261.63, 293.66, 329.63, 392.00, 440.00,   // C4 D4 E4 G4 A4
+                523.25, 587.33, 659.25, 783.99, 880.00];  // C5 D5 E5 G5 A5
+
+  const BASS = [65.41, 73.42, 82.41, 98.00, 110.00,      // C2 D2 E2 G2 A2
+                130.81, 146.83, 164.81, 196.00, 220.00];
+
+  /* ─── Hero Melody Pattern (indices into PENT) ─── */
+  // Majestic ascending/descending theme — 삼국지풍
+  const melodyPattern = [
+    // phrase 1: 천하통일의 기상
+    {i:5, dur:0.6, vel:0.9},  // C4
+    {i:6, dur:0.3, vel:0.7},  // D4
+    {i:7, dur:0.6, vel:0.85}, // E4
+    {i:9, dur:0.9, vel:1.0},  // A4
+    {i:8, dur:0.6, vel:0.8},  // G4
+    {i:7, dur:0.3, vel:0.7},  // E4
+    {i:5, dur:0.9, vel:0.75}, // C4
+    {i:4, dur:0.6, vel:0.6},  // A3
+    // phrase 2: 영웅의 걸음
+    {i:6, dur:0.6, vel:0.8},  // D4
+    {i:7, dur:0.3, vel:0.7},  // E4
+    {i:8, dur:0.6, vel:0.85}, // G4
+    {i:9, dur:0.45, vel:0.9}, // A4
+    {i:11,dur:0.6, vel:1.0},  // C5
+    {i:10,dur:0.45, vel:0.85},// B4→D5
+    {i:9, dur:0.6, vel:0.8},  // A4
+    {i:8, dur:0.9, vel:0.75}, // G4
+    // phrase 3: 격렬한 전투
+    {i:7, dur:0.25, vel:1.0}, {i:8, dur:0.25, vel:0.9},
+    {i:9, dur:0.25, vel:1.0}, {i:11,dur:0.25, vel:1.0},
+    {i:12,dur:0.5, vel:1.0},  // E5
+    {i:11,dur:0.25, vel:0.9},{i:9, dur:0.25, vel:0.85},
+    {i:8, dur:0.5, vel:0.8},  // G4
+    {i:7, dur:0.25, vel:0.75},{i:6, dur:0.25, vel:0.7},
+    {i:5, dur:1.2, vel:0.85}, // C4 long
+    // phrase 4: 귀환 — 영웅의 노래
+    {i:3, dur:0.6, vel:0.7},  // G3
+    {i:5, dur:0.45, vel:0.8}, // C4
+    {i:6, dur:0.45, vel:0.8}, // D4
+    {i:7, dur:0.6, vel:0.9},  // E4
+    {i:8, dur:0.45, vel:0.85},// G4
+    {i:9, dur:0.6, vel:0.9},  // A4
+    {i:8, dur:0.45, vel:0.8}, // G4
+    {i:7, dur:0.3, vel:0.75}, // E4
+    {i:5, dur:1.8, vel:0.85}, // C4 final hold
+  ];
+
+  const bassPattern = [
+    {i:0, dur:1.2, vel:0.7},{i:2, dur:1.2, vel:0.6},
+    {i:3, dur:1.2, vel:0.7},{i:2, dur:0.6, vel:0.6},{i:0, dur:0.6, vel:0.55},
+    {i:0, dur:0.9, vel:0.7},{i:5, dur:0.9, vel:0.65},
+    {i:3, dur:0.6, vel:0.7},{i:2, dur:0.6, vel:0.6},{i:0, dur:1.2, vel:0.7},
+  ];
+
+  // Drum pattern (kick=0, snare=1, hihat=2)
+  const drumBeat = [
+    {t:0,   type:'kick', vel:1.0},
+    {t:0.3, type:'hihat',vel:0.4},
+    {t:0.6, type:'hihat',vel:0.3},
+    {t:0.9, type:'snare',vel:0.8},
+    {t:1.2, type:'kick', vel:0.9},
+    {t:1.5, type:'hihat',vel:0.4},
+    {t:1.8, type:'kick', vel:0.7},
+    {t:2.1, type:'hihat',vel:0.35},
+    {t:2.4, type:'snare',vel:0.85},
+    {t:2.7, type:'hihat',vel:0.3},
+    {t:3.0, type:'kick', vel:1.0},
+    {t:3.3, type:'hihat',vel:0.4},
+    {t:3.6, type:'kick', vel:0.75},
+    {t:3.9, type:'hihat',vel:0.35},
+  ];
+  const DRUM_CYCLE = 4.2;
+
+  /* ─── Instrument Synthesis Functions ─── */
+
+  function makeErhu(frequency, startTime, duration, velocity) {
+    // 二胡 (erhu) — string-like, slightly nasal tone
+    const osc1 = ctx.createOscillator();
+    const osc2 = ctx.createOscillator();
+    const gain = ctx.createGain();
+    const filter = ctx.createBiquadFilter();
+
+    osc1.type = 'sawtooth';
+    osc1.frequency.setValueAtTime(frequency, startTime);
+    osc2.type = 'sine';
+    osc2.frequency.setValueAtTime(frequency * 2.01, startTime);
+
+    filter.type = 'bandpass';
+    filter.frequency.setValueAtTime(frequency * 3, startTime);
+    filter.Q.setValueAtTime(2, startTime);
+
+    // Vibrato
+    const vibLFO = ctx.createOscillator();
+    const vibGain = ctx.createGain();
+    vibLFO.frequency.setValueAtTime(5.5, startTime);
+    vibGain.gain.setValueAtTime(frequency * 0.015, startTime);
+    vibLFO.connect(vibGain);
+    vibGain.connect(osc1.frequency);
+    vibGain.connect(osc2.frequency);
+
+    osc1.connect(filter);
+    osc2.connect(filter);
+    filter.connect(gain);
+    gain.connect(masterGain);
+
+    // Envelope
+    gain.gain.setValueAtTime(0, startTime);
+    gain.gain.linearRampToValueAtTime(velocity * 0.18, startTime + 0.08);
+    gain.gain.setValueAtTime(velocity * 0.15, startTime + duration * 0.5);
+    gain.gain.linearRampToValueAtTime(0, startTime + duration);
+
+    osc1.start(startTime); osc1.stop(startTime + duration + 0.05);
+    osc2.start(startTime); osc2.stop(startTime + duration + 0.05);
+    vibLFO.start(startTime); vibLFO.stop(startTime + duration + 0.05);
+    scheduledSources.push(osc1, osc2, vibLFO);
+  }
+
+  function makeGuqin(frequency, startTime, duration, velocity) {
+    // 古琴 (guqin) — plucked string, warm
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    const filter = ctx.createBiquadFilter();
+
+    osc.type = 'triangle';
+    osc.frequency.setValueAtTime(frequency, startTime);
+    osc.frequency.exponentialRampToValueAtTime(frequency * 0.995, startTime + duration);
+
+    filter.type = 'lowpass';
+    filter.frequency.setValueAtTime(frequency * 4, startTime);
+    filter.frequency.exponentialRampToValueAtTime(frequency * 1.5, startTime + duration);
+
+    osc.connect(filter);
+    filter.connect(gain);
+    gain.connect(masterGain);
+
+    gain.gain.setValueAtTime(velocity * 0.22, startTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, startTime + duration * 0.95);
+
+    osc.start(startTime); osc.stop(startTime + duration + 0.1);
+    scheduledSources.push(osc);
+  }
+
+  function makeBass(frequency, startTime, duration, velocity) {
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    const filter = ctx.createBiquadFilter();
+
+    osc.type = 'sawtooth';
+    osc.frequency.setValueAtTime(frequency, startTime);
+
+    filter.type = 'lowpass';
+    filter.frequency.setValueAtTime(300, startTime);
+    filter.Q.setValueAtTime(1.5, startTime);
+
+    osc.connect(filter);
+    filter.connect(gain);
+    gain.connect(masterGain);
+
+    gain.gain.setValueAtTime(0, startTime);
+    gain.gain.linearRampToValueAtTime(velocity * 0.25, startTime + 0.06);
+    gain.gain.setValueAtTime(velocity * 0.2, startTime + duration * 0.6);
+    gain.gain.linearRampToValueAtTime(0, startTime + duration);
+
+    osc.start(startTime); osc.stop(startTime + duration + 0.05);
+    scheduledSources.push(osc);
+  }
+
+  function makeDrum(type, startTime, velocity) {
+    const buf = ctx.createBuffer(1, ctx.sampleRate * 0.5, ctx.sampleRate);
+    const data = buf.getChannelData(0);
+    for (let i = 0; i < data.length; i++) data[i] = Math.random() * 2 - 1;
+
+    const src = ctx.createBufferSource();
+    src.buffer = buf;
+
+    const gain = ctx.createGain();
+    const filter = ctx.createBiquadFilter();
+
+    if (type === 'kick') {
+      // Taiko drum — deep, thunderous
+      const osc = ctx.createOscillator();
+      const oGain = ctx.createGain();
+      osc.frequency.setValueAtTime(120, startTime);
+      osc.frequency.exponentialRampToValueAtTime(40, startTime + 0.3);
+      oGain.gain.setValueAtTime(velocity * 0.7, startTime);
+      oGain.gain.exponentialRampToValueAtTime(0.001, startTime + 0.35);
+      osc.connect(oGain); oGain.connect(masterGain);
+      osc.start(startTime); osc.stop(startTime + 0.4);
+      scheduledSources.push(osc);
+
+      filter.type = 'lowpass'; filter.frequency.setValueAtTime(180, startTime);
+      gain.gain.setValueAtTime(velocity * 0.35, startTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, startTime + 0.25);
+    } else if (type === 'snare') {
+      filter.type = 'bandpass'; filter.frequency.setValueAtTime(1800, startTime); filter.Q.setValueAtTime(0.5, startTime);
+      gain.gain.setValueAtTime(velocity * 0.2, startTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, startTime + 0.18);
+    } else { // hihat
+      filter.type = 'highpass'; filter.frequency.setValueAtTime(8000, startTime);
+      gain.gain.setValueAtTime(velocity * 0.06, startTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, startTime + 0.05);
+    }
+
+    src.connect(filter); filter.connect(gain); gain.connect(masterGain);
+    src.start(startTime); src.stop(startTime + 0.5);
+    scheduledSources.push(src);
+  }
+
+  function makeGong(startTime, velocity) {
+    // 징 (gong) — resonant bell strike
+    const frequencies = [220, 330, 551, 880];
+    frequencies.forEach((f, idx) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(f, startTime);
+      osc.frequency.exponentialRampToValueAtTime(f * 0.97, startTime + 3);
+      gain.gain.setValueAtTime(velocity * 0.12 / (idx + 1), startTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, startTime + 4);
+      osc.connect(gain); gain.connect(masterGain);
+      osc.start(startTime); osc.stop(startTime + 4.5);
+      scheduledSources.push(osc);
+    });
+  }
+
+  function makePad(startTime, duration) {
+    // Atmospheric string pad — underneath everything
+    const chordFreqs = [130.81, 164.81, 196.00, 261.63]; // C3 E3 G3 C4
+    chordFreqs.forEach(f => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      const filter = ctx.createBiquadFilter();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(f + (Math.random() - 0.5) * 0.5, startTime);
+      filter.type = 'lowpass'; filter.frequency.setValueAtTime(800, startTime);
+      gain.gain.setValueAtTime(0, startTime);
+      gain.gain.linearRampToValueAtTime(0.035, startTime + 2.5);
+      gain.gain.setValueAtTime(0.035, startTime + duration - 2);
+      gain.gain.linearRampToValueAtTime(0, startTime + duration);
+      osc.connect(filter); filter.connect(gain); gain.connect(masterGain);
+      osc.start(startTime); osc.stop(startTime + duration + 0.1);
+      scheduledSources.push(osc);
+    });
+  }
+
+  /* ─── Schedule One Full Loop ─── */
+  function scheduleMusicLoop(startTime) {
+    const TEMPO = 0.72; // seconds per beat (~83 BPM)
+
+    // 1. Atmospheric pad under everything
+    makePad(startTime, 28);
+
+    // 2. Opening gong strike
+    makeGong(startTime + 0.1, 0.9);
+
+    // 3. Melody (Erhu + Guqin layers)
+    let t = startTime + 1.0;
+    melodyPattern.forEach(note => {
+      const freq = PENT[note.i];
+      const dur = note.dur * TEMPO * 2.2;
+      makeErhu(freq, t, dur, note.vel);
+      if (note.vel > 0.8) makeGuqin(freq * 0.5, t, dur * 0.8, note.vel * 0.4);
+      t += note.dur * TEMPO * 1.8;
+    });
+
+    // 4. Bass line
+    let bt = startTime + 0.5;
+    for (let rep = 0; rep < 4; rep++) {
+      bassPattern.forEach(note => {
+        makeBass(BASS[note.i], bt, note.dur * TEMPO * 2, note.vel);
+        bt += note.dur * TEMPO * 1.6;
+      });
+    }
+
+    // 5. Drum pattern — starts after intro
+    const drumStart = startTime + 2.0;
+    const totalDrum = 24;
+    for (let rep = 0; rep < totalDrum; rep++) {
+      const cycleStart = drumStart + rep * DRUM_CYCLE;
+      drumBeat.forEach(hit => {
+        makeDrum(hit.type, cycleStart + hit.t, hit.vel);
+      });
+      // Mid-section gong accents
+      if (rep === 6 || rep === 14) makeGong(cycleStart, 0.6);
+    }
+
+    // Total loop ~ 28s, schedule next loop
+    const loopDuration = 28000;
+    return loopDuration;
+  }
+
+  function startBGM() {
+    if (isPlaying) return;
+    ctx = new (window.AudioContext || window.webkitAudioContext)();
+    masterGain = ctx.createGain();
+    masterGain.gain.setValueAtTime(VOL.value / 100, ctx.currentTime);
+
+    // Reverb via convolver
+    const convolver = ctx.createConvolver();
+    const revBuf = ctx.createBuffer(2, ctx.sampleRate * 2, ctx.sampleRate);
+    for (let ch = 0; ch < 2; ch++) {
+      const d = revBuf.getChannelData(ch);
+      for (let i = 0; i < d.length; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / d.length, 3);
+    }
+    convolver.buffer = revBuf;
+    const revGain = ctx.createGain(); revGain.gain.setValueAtTime(0.18, ctx.currentTime);
+    masterGain.connect(convolver); convolver.connect(revGain); revGain.connect(ctx.destination);
+    masterGain.connect(ctx.destination);
+
+    isPlaying = true;
+    BTN.classList.add('playing');
+    BTN.textContent = '⏸';
+    EQ.classList.remove('paused');
+
+    // Loop scheduler
+    function loop(nextStart) {
+      const loopDur = scheduleMusicLoop(nextStart);
+      loopTimer = setTimeout(() => loop(ctx.currentTime + 0.5), loopDur - 1500);
+    }
+    loop(ctx.currentTime + 0.05);
+  }
+
+  function stopBGM() {
+    if (!isPlaying) return;
+    isPlaying = false;
+    BTN.classList.remove('playing');
+    BTN.textContent = '🥁';
+    EQ.classList.add('paused');
+
+    clearTimeout(loopTimer);
+    scheduledSources.forEach(s => { try { s.stop(); } catch(e){} });
+    scheduledSources = [];
+    if (masterGain) { masterGain.gain.setTargetAtTime(0, ctx.currentTime, 0.1); }
+    setTimeout(() => { if (ctx) { ctx.close(); ctx = null; } }, 300);
+    CARD.classList.remove('show');
+  }
+
+  // Persist card visibility on vol change
+  VOL.addEventListener('click', e => e.stopPropagation());
+})();
+</script>
 </body>
 </html>
